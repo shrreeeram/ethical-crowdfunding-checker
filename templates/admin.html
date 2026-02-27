@@ -5,20 +5,37 @@
     <title>Admin Dashboard</title>
 </head>
 
-<body style="background:#0b132b; color:white; font-family:Arial; text-align:center;">
+<body style="background:#0f172a; color:white; font-family:sans-serif;">
 
-    <h1>Campaign Dashboard</h1>
+    <h2>Campaign Dashboard</h2>
 
-    <div style="margin:20px;">
-        <h3>Total Campaigns: {{ total }}</h3>
-        <h3 style="color:green;">Approved: {{ approved }}</h3>
-        <h3 style="color:red;">Rejected: {{ rejected }}</h3>
-        <h3>Average Trust Score: {{ avg_score }}</h3>
+    <div>
+        <p>Total: {{ total }}</p>
+        <p>Approved: {{ approved }}</p>
+        <p>Rejected: {{ rejected }}</p>
+        <p>Pending: {{ pending }}</p>
+        <p>Average Trust Score: {{ avg_score }}</p>
     </div>
 
-    <table border="1" cellpadding="10" style="margin:auto; background:#1c2541;">
+    <hr>
+
+    <form method="GET">
+        <input type="text" name="search" placeholder="Search by name" value="{{ search }}">
+
+        <select name="status">
+            <option value="">All Status</option>
+            <option value="Pending" {% if status_filter=="Pending" %}selected{% endif %}>Pending</option>
+            <option value="Approved" {% if status_filter=="Approved" %}selected{% endif %}>Approved</option>
+            <option value="Rejected" {% if status_filter=="Rejected" %}selected{% endif %}>Rejected</option>
+        </select>
+
+        <button type="submit">Filter</button>
+    </form>
+
+    <br>
+
+    <table border="1" cellpadding="10">
         <tr>
-            <th>ID</th>
             <th>Name</th>
             <th>Amount</th>
             <th>Trust Score</th>
@@ -28,24 +45,14 @@
 
         {% for c in campaigns %}
         <tr>
-            <td>{{ c.id }}</td>
             <td>{{ c.name }}</td>
             <td>₹{{ c.amount }}</td>
             <td>{{ c.trust_score }}</td>
-            <td>
-                {% if c.status == "Approved" %}
-                <span style="color:lime;">Approved</span>
-                {% elif c.status == "Rejected" %}
-                <span style="color:red;">Rejected</span>
-                {% else %}
-                <span style="color:orange;">Pending</span>
-                {% endif %}
-            </td>
+            <td>{{ c.status }}</td>
             <td>
                 {% if c.status == "Pending" %}
-                <a href="/approve/{{ c.id }}">Approve</a>
-                |
-                <a href="/reject/{{ c.id }}">Reject</a>
+                <a href="/approve/{{ c._id }}">Approve</a> |
+                <a href="/reject/{{ c._id }}">Reject</a>
                 {% else %}
                 ---
                 {% endif %}
@@ -54,8 +61,8 @@
         {% endfor %}
     </table>
 
-    <br><br>
-    <a href="/logout" style="color:red;">Logout</a>
+    <br>
+    <a href="/logout">Logout</a>
 
 </body>
 

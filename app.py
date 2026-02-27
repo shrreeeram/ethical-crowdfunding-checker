@@ -1,58 +1,57 @@
 from flask import Flask, render_template, request, redirect, url_for
-from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user
 from flask_bcrypt import Bcrypt
-from sqlalchemy import func
+from flask_pymongo import PyMongo
+from bson.objectid import ObjectId
 import os
 
 app = Flask(__name__)
 
-# ------------------ CONFIG ------------------
+# ---------------- CONFIG ----------------
 
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "fallback-secret")
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///site.db"
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-db = SQLAlchemy(app)
+app.config["MONGO_URI"] = os.environ.get(
+    "MONGO_URI",
+    "mongodb+srv://ethicaladmin:sbup@clusterpractice.suczpoe.mongodb.net/ethicaldb?retryWrites=true&w=majority"
+)
+
+mongo = PyMongo(app)
+
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
+
 bcrypt = Bcrypt(app)
 
-# ------------------ MODELS ------------------
+# ---------------- USER CLASS ----------------
 
-class User(db.Model, UserMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(20), unique=True, nullable=False)
-    password = db.Column(db.String(100), nullable=False)
-
-class Campaign(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    description = db.Column(db.Text, nullable=False)
-    amount = db.Column(db.Integer, nullable=False)
-    address = db.Column(db.String(200), nullable=False)
-    trust_score = db.Column(db.Integer)
-    status = db.Column(db.String(20), default="Pending")
-
-# ------------------ DATABASE INIT ------------------
-
-with app.app_context():
-    db.create_all()
-
-    # Create admin if not exists
-    if not User.query.filter_by(username="pruthvirajpatil").first():
-        hashed_password = bcrypt.generate_password_hash("sbup").decode("utf-8")
-        admin = User(username="pruthvirajpatil", password=hashed_password)
-        db.session.add(admin)
-        db.session.commit()
-
-# ------------------ LOGIN MANAGER ------------------
+class User(UserMixin):
+    def __init__(self, user_data):
+        self.id = str(user_data["_id"])
+        self.username = user_data["username"]
+        self.password = user_data["password"]
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    try:
+        user_data = mongo.db.users.find_one({"_id": ObjectId(user_id)})
+        if user_data:
+            return User(user_data)
+    except:
+        return None
+    return None
 
-# ------------------ TRUST SCORE ------------------
+# ---------------- CREATE ADMIN IF NOT EXISTS ----------------
+
+with app.app_context():
+    if mongo.db.users.count_documents({"username": "pruthvirajpatil"}) == 0:
+        hashed_password = bcrypt.generate_password_hash("sbup").decode("utf-8")
+        mongo.db.users.insert_one({
+            "username": "pruthvirajpatil",
+            "password": hashed_password
+        })
+
+# ---------------- TRUST SCORE ----------------
 
 def calculate_trust_score(amount, address, description):
     score = 100
@@ -71,11 +70,12 @@ def calculate_trust_score(amount, address, description):
 
     return max(score, 0)
 
-# ------------------ ROUTES ------------------
+# ---------------- ROUTES ----------------
 
 @app.route("/")
 def home():
     return render_template("index.html")
+
 
 @app.route("/submit", methods=["POST"])
 def submit():
@@ -86,33 +86,43 @@ def submit():
 
     trust_score = calculate_trust_score(amount, address, description)
 
-    new_campaign = Campaign(
-        name=name,
-        description=description,
-        amount=amount,
-        address=address,
-        trust_score=trust_score,
-        status="Pending"
-    )
-
-    db.session.add(new_campaign)
-    db.session.commit()
+    mongo.db.campaigns.insert_one({
+        "name": name,
+        "description": description,
+        "amount": amount,
+        "address": address,
+        "trust_score": trust_score,
+        "status": "Pending"
+    })
 
     return redirect(url_for("home"))
 
-# ------------------ ADMIN DASHBOARD ------------------
 
 @app.route("/admin")
 @login_required
 def admin():
-    campaigns = Campaign.query.all()
+    search = request.args.get("search", "")
+    status_filter = request.args.get("status", "")
 
-    total = Campaign.query.count()
-    approved = Campaign.query.filter_by(status="Approved").count()
-    rejected = Campaign.query.filter_by(status="Rejected").count()
+    query = {}
 
-    avg_score = db.session.query(func.avg(Campaign.trust_score)).scalar()
-    avg_score = round(avg_score, 2) if avg_score else 0
+    if search:
+        query["name"] = {"$regex": search, "$options": "i"}
+
+    if status_filter:
+        query["status"] = status_filter
+
+    campaigns = list(mongo.db.campaigns.find(query))
+
+    total = mongo.db.campaigns.count_documents({})
+    approved = mongo.db.campaigns.count_documents({"status": "Approved"})
+    rejected = mongo.db.campaigns.count_documents({"status": "Rejected"})
+    pending = mongo.db.campaigns.count_documents({"status": "Pending"})
+
+    avg_score = 0
+    all_campaigns = list(mongo.db.campaigns.find())
+    if len(all_campaigns) > 0:
+        avg_score = sum(c["trust_score"] for c in all_campaigns) / len(all_campaigns)
 
     return render_template(
         "admin.html",
@@ -120,30 +130,38 @@ def admin():
         total=total,
         approved=approved,
         rejected=rejected,
-        avg_score=avg_score
+        pending=pending,
+        avg_score=round(avg_score, 2),
+        search=search,
+        status_filter=status_filter
     )
 
-# ------------------ APPROVE ------------------
 
-@app.route("/approve/<int:id>")
+@app.route("/approve/<id>")
 @login_required
 def approve(id):
-    campaign = Campaign.query.get_or_404(id)
-    campaign.status = "Approved"
-    db.session.commit()
+    try:
+        mongo.db.campaigns.update_one(
+            {"_id": ObjectId(id)},
+            {"$set": {"status": "Approved"}}
+        )
+    except:
+        pass
     return redirect(url_for("admin"))
 
-# ------------------ REJECT ------------------
 
-@app.route("/reject/<int:id>")
+@app.route("/reject/<id>")
 @login_required
 def reject(id):
-    campaign = Campaign.query.get_or_404(id)
-    campaign.status = "Rejected"
-    db.session.commit()
+    try:
+        mongo.db.campaigns.update_one(
+            {"_id": ObjectId(id)},
+            {"$set": {"status": "Rejected"}}
+        )
+    except:
+        pass
     return redirect(url_for("admin"))
 
-# ------------------ LOGIN ------------------
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -151,15 +169,15 @@ def login():
         username = request.form["username"]
         password = request.form["password"]
 
-        user = User.query.filter_by(username=username).first()
+        user_data = mongo.db.users.find_one({"username": username})
 
-        if user and bcrypt.check_password_hash(user.password, password):
+        if user_data and bcrypt.check_password_hash(user_data["password"], password):
+            user = User(user_data)
             login_user(user)
             return redirect(url_for("admin"))
 
     return render_template("login.html")
 
-# ------------------ LOGOUT ------------------
 
 @app.route("/logout")
 @login_required
@@ -167,7 +185,7 @@ def logout():
     logout_user()
     return redirect(url_for("home"))
 
-# ------------------ RUN ------------------
+# ---------------- RUN ----------------
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
