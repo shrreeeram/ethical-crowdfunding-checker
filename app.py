@@ -37,6 +37,13 @@ class Campaign(db.Model):
 with app.app_context():
     db.create_all()
 
+    # Create admin if not exists
+    if not User.query.filter_by(username="pruthvirajpatil").first():
+        hashed_password = bcrypt.generate_password_hash("sbup").decode("utf-8")
+        admin = User(username="pruthvirajpatil", password=hashed_password)
+        db.session.add(admin)
+        db.session.commit()
+
 # ------------------ LOGIN MANAGER ------------------
 
 @login_manager.user_loader
