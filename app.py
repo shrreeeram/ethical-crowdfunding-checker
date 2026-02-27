@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user
 from flask_bcrypt import Bcrypt
+from sqlalchemy import func
 import os
 
 app = Flask(__name__)
@@ -14,15 +15,15 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
+login_manager.login_view = "login"
 bcrypt = Bcrypt(app)
 
 # ------------------ MODELS ------------------
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False)
-
+    username = db.Column(db.String(20), unique=True, nullable=False)
+    password = db.Column(db.String(100), nullable=False)
 
 class Campaign(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -31,10 +32,9 @@ class Campaign(db.Model):
     amount = db.Column(db.Integer, nullable=False)
     address = db.Column(db.String(200), nullable=False)
     trust_score = db.Column(db.Integer)
-    status = db.Column(db.String(20), default="Pending")   # ✅ Default Pending
+    status = db.Column(db.String(20), default="Pending")
 
-
-# ------------------ CREATE TABLES + ADMIN ------------------
+# ------------------ DATABASE INIT ------------------
 
 with app.app_context():
     db.create_all()
@@ -46,13 +46,11 @@ with app.app_context():
         db.session.add(admin)
         db.session.commit()
 
-
 # ------------------ LOGIN MANAGER ------------------
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
-
 
 # ------------------ TRUST SCORE ------------------
 
@@ -73,13 +71,11 @@ def calculate_trust_score(amount, address, description):
 
     return max(score, 0)
 
-
 # ------------------ ROUTES ------------------
 
 @app.route("/")
 def home():
     return render_template("index.html")
-
 
 @app.route("/submit", methods=["POST"])
 def submit():
@@ -95,8 +91,8 @@ def submit():
         description=description,
         amount=amount,
         address=address,
-        trust_score=trust_score
-        # ❌ status removed → auto Pending
+        trust_score=trust_score,
+        status="Pending"
     )
 
     db.session.add(new_campaign)
@@ -104,15 +100,31 @@ def submit():
 
     return redirect(url_for("home"))
 
+# ------------------ ADMIN DASHBOARD ------------------
 
 @app.route("/admin")
 @login_required
 def admin():
     campaigns = Campaign.query.all()
-    return render_template("admin.html", campaigns=campaigns)
 
+    total = Campaign.query.count()
+    approved = Campaign.query.filter_by(status="Approved").count()
+    rejected = Campaign.query.filter_by(status="Rejected").count()
 
-# ✅ Manual Approve Route
+    avg_score = db.session.query(func.avg(Campaign.trust_score)).scalar()
+    avg_score = round(avg_score, 2) if avg_score else 0
+
+    return render_template(
+        "admin.html",
+        campaigns=campaigns,
+        total=total,
+        approved=approved,
+        rejected=rejected,
+        avg_score=avg_score
+    )
+
+# ------------------ APPROVE ------------------
+
 @app.route("/approve/<int:id>")
 @login_required
 def approve(id):
@@ -121,8 +133,8 @@ def approve(id):
     db.session.commit()
     return redirect(url_for("admin"))
 
+# ------------------ REJECT ------------------
 
-# ✅ Manual Reject Route
 @app.route("/reject/<int:id>")
 @login_required
 def reject(id):
@@ -131,6 +143,7 @@ def reject(id):
     db.session.commit()
     return redirect(url_for("admin"))
 
+# ------------------ LOGIN ------------------
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -146,6 +159,7 @@ def login():
 
     return render_template("login.html")
 
+# ------------------ LOGOUT ------------------
 
 @app.route("/logout")
 @login_required
@@ -153,8 +167,7 @@ def logout():
     logout_user()
     return redirect(url_for("home"))
 
-
 # ------------------ RUN ------------------
 
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=True)
