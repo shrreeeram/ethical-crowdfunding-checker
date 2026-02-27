@@ -63,4 +63,5 @@ jobs:
         with:
           app-name: 'ethicalchecker-pruthvi'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_C6A1E0CD80804AAC9A2EF9DED46756C0 }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+
