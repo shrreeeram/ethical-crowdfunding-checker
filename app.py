@@ -2,10 +2,13 @@ from flask import Flask, render_template, request, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user
 from flask_bcrypt import Bcrypt
+import os
 
 app = Flask(__name__)
 
-app.config["SECRET_KEY"] = "supersecurekey"
+# ------------------ CONFIG ------------------
+
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "fallback-secret")
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///site.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -29,6 +32,13 @@ class Campaign(db.Model):
     trust_score = db.Column(db.Integer)
     status = db.Column(db.String(20))
 
+# ------------------ CREATE TABLES (IMPORTANT FIX) ------------------
+
+with app.app_context():
+    db.create_all()
+
+# ------------------ LOGIN MANAGER ------------------
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -50,10 +60,7 @@ def calculate_trust_score(amount, address, description):
         if word in description.lower():
             score -= 15
 
-    if score < 0:
-        score = 0
-
-    return score
+    return max(score, 0)
 
 # ------------------ ROUTES ------------------
 
@@ -114,7 +121,4 @@ def logout():
 # ------------------ RUN ------------------
 
 if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
-
-    app.run()
+    app.run(debug=True)
