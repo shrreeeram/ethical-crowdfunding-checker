@@ -20,8 +20,9 @@ bcrypt = Bcrypt(app)
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(20), unique=True, nullable=False)
-    password = db.Column(db.String(100), nullable=False)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+
 
 class Campaign(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -30,9 +31,10 @@ class Campaign(db.Model):
     amount = db.Column(db.Integer, nullable=False)
     address = db.Column(db.String(200), nullable=False)
     trust_score = db.Column(db.Integer)
-    status = db.Column(db.String(20))
+    status = db.Column(db.String(20), default="Pending")   # ✅ Default Pending
 
-# ------------------ CREATE TABLES (IMPORTANT FIX) ------------------
+
+# ------------------ CREATE TABLES + ADMIN ------------------
 
 with app.app_context():
     db.create_all()
@@ -44,11 +46,13 @@ with app.app_context():
         db.session.add(admin)
         db.session.commit()
 
+
 # ------------------ LOGIN MANAGER ------------------
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
+
 
 # ------------------ TRUST SCORE ------------------
 
@@ -69,11 +73,13 @@ def calculate_trust_score(amount, address, description):
 
     return max(score, 0)
 
+
 # ------------------ ROUTES ------------------
 
 @app.route("/")
 def home():
     return render_template("index.html")
+
 
 @app.route("/submit", methods=["POST"])
 def submit():
@@ -83,15 +89,14 @@ def submit():
     address = request.form["address"]
 
     trust_score = calculate_trust_score(amount, address, description)
-    status = "Approved" if trust_score >= 70 else "Potential Fraud"
 
     new_campaign = Campaign(
         name=name,
         description=description,
         amount=amount,
         address=address,
-        trust_score=trust_score,
-        status=status
+        trust_score=trust_score
+        # ❌ status removed → auto Pending
     )
 
     db.session.add(new_campaign)
@@ -99,11 +104,33 @@ def submit():
 
     return redirect(url_for("home"))
 
+
 @app.route("/admin")
 @login_required
 def admin():
     campaigns = Campaign.query.all()
     return render_template("admin.html", campaigns=campaigns)
+
+
+# ✅ Manual Approve Route
+@app.route("/approve/<int:id>")
+@login_required
+def approve(id):
+    campaign = Campaign.query.get_or_404(id)
+    campaign.status = "Approved"
+    db.session.commit()
+    return redirect(url_for("admin"))
+
+
+# ✅ Manual Reject Route
+@app.route("/reject/<int:id>")
+@login_required
+def reject(id):
+    campaign = Campaign.query.get_or_404(id)
+    campaign.status = "Rejected"
+    db.session.commit()
+    return redirect(url_for("admin"))
+
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -119,13 +146,15 @@ def login():
 
     return render_template("login.html")
 
+
 @app.route("/logout")
 @login_required
 def logout():
     logout_user()
     return redirect(url_for("home"))
 
+
 # ------------------ RUN ------------------
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
